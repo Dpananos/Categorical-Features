@@ -1,0 +1,191 @@
+---
+title: "Much Ado About Categorical Factors?"
+output:
+  md_document:
+    variant: markdown_github
+
+---
+
+```{r, echo = FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = FALSE, 
+                      message = FALSE, 
+                      warning = FALSE, 
+                      cache = FALSE,
+                      fig.cap = "", 
+                      dpi = 400,
+                      fig.align = 'center'
+
+                      )
+```
+
+#Introduction
+
+Imagine working with a dataset containing all the zip codes in the United States.  That is a datset containing nearly 40,000 unique categories.  How would you deal with that kind of data if you planned to do predictive modelling?  One hot encoding doesn't get you anywhere useful, since that would add 40,000 sparse variables to your dataset.  Throwing the data out could be leaving valuable information on the table, so that doesn't seem right either.
+
+In this post, I'm going to examine how to deal with categorical variables with high cardinality using a stratey called *impact encoding*.  To illustrate this example, I use a data set containing used car sales.  The probelm is especially well suited because there are several categorical features with many levels.  Let's get started.
+
+___
+# Data Examination & Visualization
+
+Here is a sample of the data I will be analyzing.  As can be seen, there are several columns (e.g. `VehicleMake`,`VehicleModel`, and `VehicleTrim` ) which are categorical.  Most of these columns have 50 to 1000+ levels in no particular order.  If we were to naively dummy encode these variables, we would be left with a very high dimensional problem.
+
+I've already went ahead and cleaned the data, transforming the dates to days before the most recent date.  There are some missing entries, and so I will just treat the missingness as another level.
+```{r, include = F}
+library(MASS)
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+theme_set(theme_minimal())
+
+#Not including the data in the github repo since data is proprietary 
+
+data <- read_csv('~/Documents/Python/Transactions.csv')
+
+to_factor = c(
+              'VehicleMake',
+              'VehicleModel',
+              'VehicleTrim',
+              'VehicleMarketClassId',
+              'City',
+              'Province',
+              'FSA',
+              'company_id',
+              'dealer_type',
+              'AccidentDetail'
+              )
+
+
+# Though there are no exact duplicates, sales for the same car appear in different cities.
+# Just a quirk of the data. Will filter by distinct VIN. I'll also remove some superfluous columns
+# and change approrpriate data types
+
+#There are also a lot of missing data.  I could impute this, but won't this time around.
+
+data_2 <- data %>% 
+          distinct(
+                    VinValue,
+                    VinId,
+                    .keep_all = T
+                  ) %>% 
+          select(
+                  -VinValue,
+                  -VinId,
+                  -VehicleMarketClassDisplay,
+                  -Company
+                  ) %>% 
+          mutate(
+                  VehicleYear = 2017-VehicleYear,
+                  ContractDate = difftime(ymd('2017-06-30'),ContractDate, unit = 'days') %>% as.numeric(),
+                  AccidentDate = ymd(AccidentDate),
+                  AccidentDate = difftime(ymd('2017-06-30'),AccidentDate, unit = 'days') %>% as.numeric(),
+                  AccidentDate = case_when(
+                                            HasPoliceReportedAccident==0~-2,
+                                            HasPoliceReportedAccident==1&!is.na(AccidentDate)~AccidentDate,
+                                            is.na(AccidentDate) ~ -1
+                                          ),
+                  AccidentDetail = case_when(
+                                            HasPoliceReportedAccident==0~'No Accident',
+                                            HasPoliceReportedAccident==1~AccidentDetail
+                                          ),
+                  TotalClaims = as.numeric(TotalClaims),
+                  TotalClaims = factor(case_when(
+                                                  TotalClaims==NA ~ 'NA',
+                                                  TotalClaims==0 ~ '0',
+                                                  (TotalClaims>0)&(TotalClaims<=1000) ~ '<=1000',
+                                                  between(TotalClaims,1001,5000) ~ '<=5000',
+                                                  between(TotalClaims,5001,10000) ~ '<=10000',
+                                                  TotalClaims>10000 ~ '>10000'
+                                                )
+                                      ),
+                  TotalClaims = addNA(TotalClaims)
+                  ) %>% 
+            mutate_at(funs(factor(.)),.vars =to_factor) %>% 
+            mutate_at(funs(addNA(.)), .vars = to_factor)
+
+
+
+BC = MASS::boxcox(VehicleSalePrice~1,data = data_2, plotit = F)
+lam_ix = which.max(BC$y)
+lam = BC$x[lam_ix]
+
+data_2['SalePrice_bc'] = (data_2$VehicleSalePrice^lam-1)/lam
+
+
+#Will need ranks of car makes
+Gd = data_2 %>% group_by(VehicleMake) %>% summarise(mu = mean(SalePrice_bc)) %>% arrange(desc(mu)) %>% ungroup
+orders = Gd$VehicleMake
+MU = mean(data_2$SalePrice_bc)
+data_2['VehicleMake'] = ordered(data_2$VehicleMake, levels = orders)
+
+
+```
+
+```{r}
+sapply(data_2, class)
+```
+
+I've also gone agead and performed a Box-Cox transform on `VehicleSalePrice` (shown below) in order to get the variable closer to a normal distribution.
+```{r}
+p1 = data_2 %>% ggplot() + geom_density(aes(VehicleSalePrice), fill = 'lightblue') + xlab('SalePrice (before Transform)')
+p2 = data_2 %>% ggplot() + geom_density(aes(SalePrice_bc), fill = 'grey') +xlab('SalePrice (after Transform)')
+
+ggarrange(p1,p2, labels = c("A","B") )
+```
+
+Now is where we would do some exploratory data analysis.  I'm going to leave that out for now and focus on encoding the factors with impact encoding.
+
+
+# Impact Encoding.
+
+Let $\mathbf{y}$ denote our response variable, and let $\mathbf{x}$ be a cateforical feature.  The impact coding of $\mathbf{x}$ is
+
+$$ \operatorname{Ic(\mathbf{x})} = \operatorname{E}\left[ \mathbf{y} \vert \mathbf{x} \right]  - \operatorname{E}\left[ \mathbf{y}  \right] \>.  $$
+
+Applied to data manipulation, we just group by the factors and take the mean of our response variable (in this example it is `SalePrice_bc`), then subtract the mean of the entire response.  Not only does this present a numerical encoding, it presents an ordered encoding. 
+
+I could loop through the factor columns, but there is an easier way to encode the categorical variables using a new library called `vtreat`.  The library has a very nice [companion paper on arXiv](https://arxiv.org/abs/1611.09477).  In this paper are recomendations for encoding variables and examples. I highly recommend you read the paper before using the library.   For our data, the encoding is as simple as
+
+```{r, echo = T}
+
+#Prepare a treatment plan for the dataframe
+treatment <- vtreat::designTreatmentsN(dframe = data_2 %>% select(-VehicleSalePrice),
+                                       varlist = colnames(data_2 %>% select(-VehicleSalePrice)),
+                                       outcomename = 'SalePrice_bc',
+                                       verbose = F)
+
+scoreFrame = treatment$scoreFrame
+
+#Which vars do we want to keep
+vars <- scoreFrame$varName[(scoreFrame$code %in% c("catN", "clean"))] #read paper to see what CatN and Clean mean
+
+#Apply the treatment plan
+treated_data = vtreat::prepare(data_2,
+                               treatmentplan = treatment,
+                               varRestriction = vars)
+
+treated_data %>% head
+```
+Now all your categorical variables have an ordered numeric encoding. 
+
+To prove that the impact encoding works as promises, I have plotted the results from `vtreat` in blue, and the manual impact encodings in black for the variable `VehicleMake`.  As you can see, the manual encoding and `vtreat`'s encoding are exactly the same.
+
+
+```{r, fig.align='center', fig.height=8, fig.width=8}
+treated_data['VehicleMake'] = data_2$VehicleMake
+
+treated_data %>% 
+                ggplot(aes(VehicleMake,VehicleMake_catN)) + 
+                geom_point( color = 'blue', fill = 'blue',size = 2) + 
+                geom_point(data = Gd, aes(VehicleMake,mu - MU ), shape = 1, size = 5) + 
+                coord_flip() +
+                ylab('Impact Encoding')
+
+
+```
+
+
+# Conclusion
+
+Some datasets contain categorical levels which can not be one hot encoded because they contain so many levels.  As good data scientists, we want to retain possible useful information but do not want to increase the size of our feature set.  Impact encoding is a useful way to encode categorical features of high dimension.  The library `vtreat` is a new library that was created to implement impact encoding and removes the difficulty of looping through several columns.
+
