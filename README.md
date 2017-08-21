@@ -14,59 +14,20 @@ Here is a sample of the data I will be analyzing. As can be seen, there are seve
 
 I've already went ahead and cleaned the data, transforming the dates to days before the most recent date. There are some missing entries, and so I will just treat the missingness as another level.
 
-    ## $VehicleYear
-    ## [1] "numeric"
-    ## 
-    ## $VehicleMake
-    ## [1] "ordered" "factor" 
-    ## 
-    ## $VehicleModel
-    ## [1] "factor"
-    ## 
-    ## $VehicleTrim
-    ## [1] "factor"
-    ## 
-    ## $VehicleMarketClassId
-    ## [1] "factor"
-    ## 
-    ## $VehicleSalePrice
-    ## [1] "numeric"
-    ## 
-    ## $ContractDate
-    ## [1] "numeric"
-    ## 
-    ## $DeliveryOdometer
-    ## [1] "integer"
-    ## 
-    ## $TotalClaims
-    ## [1] "factor"
-    ## 
-    ## $City
-    ## [1] "factor"
-    ## 
-    ## $Province
-    ## [1] "factor"
-    ## 
-    ## $FSA
-    ## [1] "factor"
-    ## 
-    ## $company_id
-    ## [1] "factor"
-    ## 
-    ## $dealer_type
-    ## [1] "factor"
-    ## 
-    ## $HasPoliceReportedAccident
-    ## [1] "integer"
-    ## 
-    ## $AccidentDate
-    ## [1] "numeric"
-    ## 
-    ## $AccidentDetail
-    ## [1] "factor"
-    ## 
-    ## $SalePrice_bc
-    ## [1] "numeric"
+    ## # A tibble: 6 x 17
+    ##   VehicleYear VehicleMake VehicleModel VehicleTrim VehicleMarketClassId
+    ##         <dbl>       <ord>       <fctr>      <fctr>               <fctr>
+    ## 1          10       Acura           TL        Base                   44
+    ## 2           7       Dodge      Avenger         SXT                   44
+    ## 3           8       Dodge      Caliber         SXT                   43
+    ## 4           9       Dodge      Caliber         SXT                   43
+    ## 5           9       Dodge      Avenger         SXT                   44
+    ## 6           5    Chrysler          200          LX                   44
+    ## # ... with 12 more variables: ContractDate <dbl>, DeliveryOdometer <int>,
+    ## #   TotalClaims <fctr>, City <fctr>, Province <fctr>, FSA <fctr>,
+    ## #   company_id <fctr>, dealer_type <fctr>,
+    ## #   HasPoliceReportedAccident <int>, AccidentDate <dbl>,
+    ## #   AccidentDetail <fctr>, SalePrice_bc <dbl>
 
 I've also gone agead and performed a Box-Cox transform on `VehicleSalePrice` (shown below) in order to get the variable closer to a normal distribution. <img src="Categorical_treatment_files/figure-markdown_github/unnamed-chunk-4-1.png" style="display: block; margin: auto;" />
 
@@ -85,8 +46,8 @@ I could loop through the factor columns, but there is an easier way to encode th
 
 ``` r
 #Prepare a treatment plan for the dataframe
-treatment <- vtreat::designTreatmentsN(dframe = data_2 %>% select(-VehicleSalePrice),
-                                       varlist = colnames(data_2 %>% select(-VehicleSalePrice)),
+treatment <- vtreat::designTreatmentsN(dframe = car_data,
+                                       varlist = colnames(car_data),
                                        outcomename = 'SalePrice_bc',
                                        verbose = F)
 
@@ -96,7 +57,7 @@ scoreFrame = treatment$scoreFrame
 vars <- scoreFrame$varName[(scoreFrame$code %in% c("catN", "clean"))] #read paper to see what CatN and Clean mean
 
 #Apply the treatment plan
-treated_data = vtreat::prepare(data_2,
+treated_data = vtreat::prepare(car_data,
                                treatmentplan = treatment,
                                varRestriction = vars)
 

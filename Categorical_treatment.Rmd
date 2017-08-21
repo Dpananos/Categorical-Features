@@ -118,11 +118,13 @@ orders = Gd$VehicleMake
 MU = mean(data_2$SalePrice_bc)
 data_2['VehicleMake'] = ordered(data_2$VehicleMake, levels = orders)
 
+car_data <- data_2 %>% select(-VehicleSalePrice)
+
 
 ```
 
 ```{r}
-sapply(data_2, class)
+car_data %>% head()
 ```
 
 I've also gone agead and performed a Box-Cox transform on `VehicleSalePrice` (shown below) in order to get the variable closer to a normal distribution.
@@ -149,8 +151,8 @@ I could loop through the factor columns, but there is an easier way to encode th
 ```{r, echo = T}
 
 #Prepare a treatment plan for the dataframe
-treatment <- vtreat::designTreatmentsN(dframe = data_2 %>% select(-VehicleSalePrice),
-                                       varlist = colnames(data_2 %>% select(-VehicleSalePrice)),
+treatment <- vtreat::designTreatmentsN(dframe = car_data,
+                                       varlist = colnames(car_data),
                                        outcomename = 'SalePrice_bc',
                                        verbose = F)
 
@@ -160,7 +162,7 @@ scoreFrame = treatment$scoreFrame
 vars <- scoreFrame$varName[(scoreFrame$code %in% c("catN", "clean"))] #read paper to see what CatN and Clean mean
 
 #Apply the treatment plan
-treated_data = vtreat::prepare(data_2,
+treated_data = vtreat::prepare(car_data,
                                treatmentplan = treatment,
                                varRestriction = vars)
 
